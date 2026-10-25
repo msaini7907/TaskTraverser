@@ -1,0 +1,101 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: tasktraverser_db
+    hostname: postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_DATABASE:-todotraverse}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/database.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      tasktraverser_network:
+        aliases:
+          - db
+          - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+#-----------------------------------------------------------------------------------#
+
+  # Backend API Server
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: tasktraverser_backend
+    hostname: backend
+    environment:
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_DATABASE: ${DB_DATABASE:-todotraverse}
+    ports:
+      - "${BACKEND_PORT:-5000}:5000"
+    expose:
+      - "5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      tasktraverser_network:
+        aliases:
+          - api
+          - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/TodoTraverse', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+#-----------------------------------------------------------------------------------#
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: tasktraverser_frontend
+    hostname: frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    expose:
+      - "3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      REACT_APP_API_URL: http://localhost:5000
+    networks:
+      tasktraverser_network:
+        aliases:
+          - web
+          - frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+#-----------------------------------------------------------------------------------#
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  tasktraverser_network:
+    driver: bridge
+
+
